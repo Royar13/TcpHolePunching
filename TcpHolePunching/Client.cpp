@@ -51,13 +51,25 @@ int Client::CreateSocket()
 		printf("Unable to connect to server!\n");
 		return 1;
 	}
+	sockaddr_in socketName;
+	int nameLen = sizeof(socketName);
+	iResult = getsockname(connectSocket.get(), (sockaddr*)&socketName, &nameLen);
+	if (iResult == SOCKET_ERROR) {
+		printf("Error at getsockname(): %ld\n", WSAGetLastError());
+		return 1;
+	}
+	char localpAddress[INET_ADDRSTRLEN];
+	if (inet_ntop(AF_INET, &(socketName.sin_addr), localpAddress, INET_ADDRSTRLEN) == nullptr) {
+		printf("Failed to convert IP address to string.");
+		return 1;
+	}
 
 	int recvbuflen = DEFAULT_BUFLEN;
-	const char* sendbuf = "this is a test";
+	string sendbuf = string(localpAddress) + ";" + to_string(socketName.sin_port);
 	char recvbuf[DEFAULT_BUFLEN + 1];
 
 	// Send an initial buffer
-	iResult = send(connectSocket.get(), sendbuf, (int)strlen(sendbuf), 0);
+	iResult = send(connectSocket.get(), sendbuf.c_str(), (int)strlen(sendbuf.c_str()), 0);
 	if (iResult == SOCKET_ERROR) {
 		printf("send failed: %d\n", WSAGetLastError());
 		return 1;
