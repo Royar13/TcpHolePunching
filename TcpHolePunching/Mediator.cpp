@@ -11,7 +11,7 @@ using namespace std;
 
 int Mediator::CreateSocket()
 {
-	struct addrinfo* result = NULL, * ptr = NULL, hints;
+	struct addrinfo* result = NULL, hints;
 
 	ZeroMemory(&hints, sizeof(hints));
 	hints.ai_family = AF_INET;
@@ -58,14 +58,14 @@ int Mediator::CreateSocket()
 		return 1;
 	}
 
-	printf("Accepting connections...");
+	printf("Accepting connections...\n");
 	wil::unique_socket clientSocket(accept(listenSocket.get(), NULL, NULL));
 	if (clientSocket.get() == INVALID_SOCKET) {
 		printf("accept failed: %d\n", WSAGetLastError());
 		return 1;
 	}
 
-	char recvbuf[DEFAULT_BUFLEN];
+	char recvbuf[DEFAULT_BUFLEN + 1];
 	int iSendResult;
 	int recvbuflen = DEFAULT_BUFLEN;
 
@@ -73,7 +73,8 @@ int Mediator::CreateSocket()
 	do {
 		iResult = recv(clientSocket.get(), recvbuf, recvbuflen, 0);
 		if (iResult > 0) {
-			printf("Bytes received: %d\n", iResult);
+			recvbuf[iResult] = '\0';
+			printf("Bytes received: %d\nMessage: %s\n", iResult, recvbuf);
 
 			// Echo the buffer back to the sender
 			iSendResult = send(clientSocket.get(), recvbuf, iResult, 0);

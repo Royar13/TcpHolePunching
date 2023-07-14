@@ -2,6 +2,6 @@
 class Client
 {
 public:
-	void CreateSocket();
+	int CreateSocket();
 };
 
