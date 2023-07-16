@@ -2,7 +2,9 @@
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <string>
+#include <memory>
 #include <wil/resource.h>
+#include "SessionEndpoint.h"
 
 using namespace std;
 
@@ -58,40 +60,60 @@ int Mediator::CreateSocket()
 		return 1;
 	}
 
+	unique_ptr<SessionEndpoint> sessions[2][2];
 	printf("Accepting connections...\n");
-	wil::unique_socket clientSocket(accept(listenSocket.get(), NULL, NULL));
-	if (clientSocket.get() == INVALID_SOCKET) {
-		printf("accept failed: %d\n", WSAGetLastError());
-		return 1;
-	}
-
-	char recvbuf[DEFAULT_BUFLEN + 1];
-	int iSendResult;
-	int recvbuflen = DEFAULT_BUFLEN;
-
-	// Receive until the peer shuts down the connection
-	do {
-		iResult = recv(clientSocket.get(), recvbuf, recvbuflen, 0);
-		if (iResult > 0) {
-			recvbuf[iResult] = '\0';
-			printf("Bytes received: %d\nMessage: %s\n", iResult, recvbuf);
-
-			// Echo the buffer back to the sender
-			iSendResult = send(clientSocket.get(), recvbuf, iResult, 0);
-			if (iSendResult == SOCKET_ERROR) {
-				printf("send failed: %d\n", WSAGetLastError());
-				return 1;
-			}
-			printf("Bytes sent: %d\n", iSendResult);
-		}
-		else if (iResult == 0)
-			printf("Connection closing...\n");
-		else {
-			printf("recv failed: %d\n", WSAGetLastError());
+	for (int i = 0; i < 2; i++) {
+		wil::unique_socket clientSocket(accept(listenSocket.get(), NULL, NULL));
+		if (clientSocket.get() == INVALID_SOCKET) {
+			printf("accept failed: %d\n", WSAGetLastError());
 			return 1;
 		}
 
-	} while (iResult > 0);
+		sockaddr_in peerName;
+		int nameLen = sizeof(peerName);
+		iResult = getpeername(clientSocket.get(), (sockaddr*)&peerName, &nameLen);
+		if (iResult == SOCKET_ERROR) {
+			printf("Error at getsockname(): %ld\n", WSAGetLastError());
+			return 1;
+		}
+		char peerPublicIpAddress[INET_ADDRSTRLEN];
+		if (inet_ntop(AF_INET, &(peerName.sin_addr), peerPublicIpAddress, INET_ADDRSTRLEN) == nullptr) {
+			printf("Failed to convert IP address to string.");
+			return 1;
+		}
+		auto peerPublicPort = peerName.sin_port;
+		sessions[i][1] = make_unique<SessionEndpoint>(peerPublicIpAddress, peerPublicPort);
+
+		char recvbuf[DEFAULT_BUFLEN + 1];
+		int iSendResult;
+		int recvbuflen = DEFAULT_BUFLEN;
+
+		// Receive until the peer shuts down the connection
+		do {
+			iResult = recv(clientSocket.get(), recvbuf, recvbuflen, 0);
+			if (iResult > 0) {
+				recvbuf[iResult] = '\0';
+				auto clientSession = SessionEndpoint::FromString(recvbuf);
+				sessions[i][0] = make_unique<SessionEndpoint>(clientSession.ipAddress, clientSession.port);
+				printf("Bytes received: %d\nMessage: %s\n", iResult, recvbuf);
+
+				// Echo the buffer back to the sender
+				iSendResult = send(clientSocket.get(), recvbuf, iResult, 0);
+				if (iSendResult == SOCKET_ERROR) {
+					printf("send failed: %d\n", WSAGetLastError());
+					return 1;
+				}
+				printf("Bytes sent: %d\n", iSendResult);
+			}
+			else if (iResult == 0)
+				printf("Connection closing...\n");
+			else {
+				printf("recv failed: %d\n", WSAGetLastError());
+				return 1;
+			}
+
+		} while (iResult > 0);
+	}
 
 	return 0;
 }

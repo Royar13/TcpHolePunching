@@ -137,11 +137,15 @@
   <ItemGroup>
     <ClCompile Include="Client.cpp" />
     <ClCompile Include="Mediator.cpp" />
+    <ClCompile Include="SessionEndpoint.cpp" />
     <ClCompile Include="TcpHolePunching.cpp" />
+    <ClCompile Include="Utils.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Client.h" />
     <ClInclude Include="Mediator.h" />
+    <ClInclude Include="SessionEndpoint.h" />
+    <ClInclude Include="Utils.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
