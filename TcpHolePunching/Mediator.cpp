@@ -66,17 +66,11 @@ int Mediator::CreateSocket()
 	printf("Accepting connections...\n");
 	for (int i = 0; i < 2; i++) {
 		auto& clientSocket = clientSockets[i];
-		clientSocket.reset(accept(listenSocket.get(), NULL, NULL));
-		if (clientSocket.get() == INVALID_SOCKET) {
-			printf("accept failed: %d\n", WSAGetLastError());
-			return 1;
-		}
-
 		sockaddr_in peerName;
 		int nameLen = sizeof(peerName);
-		iResult = getpeername(clientSocket.get(), (sockaddr*)&peerName, &nameLen);
-		if (iResult == SOCKET_ERROR) {
-			printf("Error at getsockname(): %ld\n", WSAGetLastError());
+		clientSocket.reset(accept(listenSocket.get(), (sockaddr*)&peerName, &nameLen));
+		if (clientSocket.get() == INVALID_SOCKET) {
+			printf("accept failed: %d\n", WSAGetLastError());
 			return 1;
 		}
 		char peerPublicIpAddress[INET_ADDRSTRLEN];

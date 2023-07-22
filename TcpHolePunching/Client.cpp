@@ -26,7 +26,7 @@ array<unique_ptr<Address>, 2> ParseAddressesFromMediator(string addressStr) {
 	return addresses;
 }
 
-void Client::Connect(const Address& address) {
+void Client::Connect(USHORT port, const Address& connectToAddress) {
 	struct addrinfo* result = NULL,
 		* ptr = NULL,
 		hints;
@@ -36,9 +36,9 @@ void Client::Connect(const Address& address) {
 	hints.ai_socktype = SOCK_STREAM;
 	hints.ai_protocol = IPPROTO_TCP;
 
-	int iResult = getaddrinfo(address.ipAddress.c_str(), to_string(address.port).c_str(), &hints, &result);
+	int iResult = getaddrinfo(connectToAddress.ipAddress.c_str(), to_string(connectToAddress.port).c_str(), &hints, &result);
 	if (iResult != 0) {
-		printf("Connect: getaddrinfo failed: %d\n", iResult);
+		printf("Connect: getaddrinfo for connectToAddress failed: %d\n", iResult);
 		return;
 	}
 
@@ -50,9 +50,21 @@ void Client::Connect(const Address& address) {
 		return;
 	}
 
+	iResult = getaddrinfo(NULL, to_string(port).c_str(), &hints, &result);
+	if (iResult != 0) {
+		printf("Connect: getaddrinfo for local address failed: %d\n", iResult);
+		return;
+	}
+
 	const char enable = 1;
 	if (setsockopt(connectSocket.get(), SOL_SOCKET, SO_REUSEADDR, &enable, sizeof(enable)) == SOCKET_ERROR) {
 		printf("Connect: Error at setsockopt() SO_REUSEADDR: %ld\n", WSAGetLastError());
+		return;
+	}
+
+	iResult = bind(connectSocket.get(), result->ai_addr, (int)result->ai_addrlen);
+	if (iResult == SOCKET_ERROR) {
+		printf("Connect: bind failed with error: %d\n", WSAGetLastError());
 		return;
 	}
 
@@ -65,33 +77,112 @@ void Client::Connect(const Address& address) {
 		return;
 	}
 
-	iResult = connect(connectSocket.get(), ptr->ai_addr, (int)ptr->ai_addrlen);
-	if (iResult == SOCKET_ERROR) {
-		printf("Connect: Unable to connect to other client!\n");
-		return;
-	}
-
-	fd_set Write, Err;
-	FD_ZERO(&Write);
-	FD_ZERO(&Err);
-	FD_SET(connectSocket.get(), &Write);
-	FD_SET(connectSocket.get(), &Err);
-
-	// check if the socket is ready
 	TIMEVAL Timeout;
-	Timeout.tv_sec = 3;
+	Timeout.tv_sec = c_timeoutSec;
 	Timeout.tv_usec = 0;
-	select(0, NULL, &Write, &Err, &Timeout);
-	if (FD_ISSET(connectSocket.get(), &Write))
-	{
-		return true;
-	}
 
-	connected = true;
+	for (int i = 0; i < c_maxAttempts; i++) {
+		iResult = connect(connectSocket.get(), ptr->ai_addr, (int)ptr->ai_addrlen);
+		if (iResult == SOCKET_ERROR) {
+			printf("Connect: Unable to connect to other client!\n");
+			return;
+		}
+
+		fd_set Write, Err;
+		FD_ZERO(&Write);
+		FD_ZERO(&Err);
+		FD_SET(connectSocket.get(), &Write);
+		FD_SET(connectSocket.get(), &Err);
+
+		// check if the socket is ready
+		select(0, NULL, &Write, &Err, &Timeout);
+		if (FD_ISSET(connectSocket.get(), &Write))
+		{
+			lock_guard<mutex> lock(m_updatePeerInfoMutex);
+			m_successfulPeerSocket.swap(connectSocket);
+			return;
+		}
+	}
 }
 
 void Client::Accept(USHORT port) {
+	struct addrinfo* result = NULL, hints;
 
+	ZeroMemory(&hints, sizeof(hints));
+	hints.ai_family = AF_INET;
+	hints.ai_socktype = SOCK_STREAM;
+	hints.ai_protocol = IPPROTO_TCP;
+	hints.ai_flags = AI_PASSIVE;
+
+	// Resolve the local address and port to be used by the server
+	auto iResult = getaddrinfo(NULL, to_string(port).c_str(), &hints, &result);
+	if (iResult != 0) {
+		printf("Accept: getaddrinfo failed: %d\n", iResult);
+		return;
+	}
+
+	wil::unique_socket listenSocket(socket(result->ai_family, result->ai_socktype, result->ai_protocol));
+	if (listenSocket.get() == INVALID_SOCKET) {
+		printf("Accept: Error at socket(): %ld\n", WSAGetLastError());
+		return;
+	}
+
+	const char enable = 1;
+	if (setsockopt(listenSocket.get(), SOL_SOCKET, SO_REUSEADDR, &enable, sizeof(enable)) == SOCKET_ERROR) {
+		printf("Accept: Error at setsockopt() SO_REUSEADDR: %ld\n", WSAGetLastError());
+		return;
+	}
+
+	iResult = bind(listenSocket.get(), result->ai_addr, (int)result->ai_addrlen);
+	if (iResult == SOCKET_ERROR) {
+		printf("Accept: bind failed with error: %d\n", WSAGetLastError());
+		return;
+	}
+	freeaddrinfo(result);
+	result = NULL;
+
+	//set the socket in non-blocking
+	unsigned long iMode = 1;
+	iResult = ioctlsocket(listenSocket.get(), FIONBIO, &iMode);
+	if (iResult == SOCKET_ERROR)
+	{
+		printf("Accept: ioctlsocket failed with error: %ld\n", iResult);
+		return;
+	}
+
+	if (listen(listenSocket.get(), SOMAXCONN) == SOCKET_ERROR) {
+		printf("Accept: Listen failed with error: %ld\n", WSAGetLastError());
+		return;
+	}
+
+	TIMEVAL Timeout;
+	Timeout.tv_sec = c_timeoutSec;
+	Timeout.tv_usec = 0;
+
+	for (int i = 0; i < c_maxAttempts; i++) {
+		sockaddr_in peerName;
+		int nameLen = sizeof(peerName);
+		wil::unique_socket clientSocket(accept(listenSocket.get(), (sockaddr*)&peerName, &nameLen));
+		if (clientSocket.get() == INVALID_SOCKET) {
+			printf("Accept: accept failed: %d\n", WSAGetLastError());
+			return;
+		}
+
+		fd_set Read, Err;
+		FD_ZERO(&Read);
+		FD_ZERO(&Err);
+		FD_SET(clientSocket.get(), &Read);
+		FD_SET(clientSocket.get(), &Err);
+
+		// check if the socket is ready
+		select(0, &Read, NULL, &Err, &Timeout);
+		if (FD_ISSET(clientSocket.get(), &Read))
+		{
+			lock_guard<mutex> lock(m_updatePeerInfoMutex);
+			m_successfulPeerSocket.swap(clientSocket);
+			return;
+		}
+	}
 }
 
 int Client::CreateSocket()
@@ -171,7 +262,6 @@ int Client::CreateSocket()
 		return 1;
 	}
 
-
 	iResult = recv(connectSocket.get(), recvbuf, recvbuflen, 0);
 	if (iResult == 0) {
 		printf("Connection closed\n");
@@ -184,6 +274,12 @@ int Client::CreateSocket()
 	recvbuf[iResult] = '\0';
 	printf("Bytes received: %d\nMessage: %s\n", iResult, recvbuf);
 	auto addresses = ParseAddressesFromMediator(recvbuf);
+
+	thread connectToPrivate(&Client::Connect, this, privateAddress.port, *addresses[0]);
+	thread connectToPublic(&Client::Connect, this, privateAddress.port, *addresses[1]);
+
+	connectToPrivate.join();
+	connectToPublic.join();
 
 	return 0;
 }
