@@ -1,13 +1,18 @@
-#include "SessionEndpoint.h"
+#include "Address.h"
 
 using namespace std;
 
-SessionEndpoint::SessionEndpoint(const std::string& ipAddress, USHORT port)
+Address::Address(const std::string& ipAddress, USHORT port)
 	:ipAddress(ipAddress), port(port)
 {
 }
 
-SessionEndpoint SessionEndpoint::FromString(const std::string& session)
+Address::operator std::string()
+{
+	return ipAddress + ":" + to_string(port);
+}
+
+Address Address::FromString(const std::string& session)
 {
 	auto pos = session.find(":");
 	if (pos == string::npos) {
@@ -16,5 +21,5 @@ SessionEndpoint SessionEndpoint::FromString(const std::string& session)
 	string ipAddress = session.substr(0, pos);
 	string port = session.substr(pos + 2);
 	auto portNum = (USHORT)stoi(port);
-	return SessionEndpoint(ipAddress, portNum);
+	return Address(ipAddress, portNum);
 }

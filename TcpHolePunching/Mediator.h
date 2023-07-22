@@ -3,5 +3,6 @@ class Mediator
 {
 public:
 	int CreateSocket();
+
 };
 
