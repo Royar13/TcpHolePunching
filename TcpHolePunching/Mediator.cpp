@@ -6,6 +6,7 @@
 #include <wil/resource.h>
 #include <array>
 #include "Address.h"
+#include <iostream>
 
 using namespace std;
 
@@ -14,7 +15,7 @@ using namespace std;
 
 int Mediator::CreateSocket()
 {
-	struct addrinfo* result = NULL, hints;
+	struct addrinfo* localAddrInfo = NULL, hints;
 
 	ZeroMemory(&hints, sizeof(hints));
 	hints.ai_family = AF_INET;
@@ -24,38 +25,42 @@ int Mediator::CreateSocket()
 
 	auto cleanup = wil::scope_exit([&]
 		{
-			if (result != NULL)
-				freeaddrinfo(result);
+			if (localAddrInfo != NULL)
+				freeaddrinfo(localAddrInfo);
 			WSACleanup();
 		});
 
 	// Resolve the local address and port to be used by the server
-	auto iResult = getaddrinfo(NULL, PORT, &hints, &result);
+	auto iResult = getaddrinfo(NULL, PORT, &hints, &localAddrInfo);
 	if (iResult != 0) {
 		printf("getaddrinfo failed: %d\n", iResult);
 		return 1;
 	}
 
-	wil::unique_socket listenSocket(socket(result->ai_family, result->ai_socktype, result->ai_protocol));
+	// Create socket
+	wil::unique_socket listenSocket(socket(localAddrInfo->ai_family, localAddrInfo->ai_socktype, localAddrInfo->ai_protocol));
 	if (listenSocket.get() == INVALID_SOCKET) {
 		printf("Error at socket(): %ld\n", WSAGetLastError());
 		return 1;
 	}
 
+	// Enable reuse address
 	const char enable = 1;
 	if (setsockopt(listenSocket.get(), SOL_SOCKET, SO_REUSEADDR, &enable, sizeof(enable)) == SOCKET_ERROR) {
 		printf("Error at setsockopt() SO_REUSEADDR: %ld\n", WSAGetLastError());
 		return 1;
 	}
 
-	iResult = bind(listenSocket.get(), result->ai_addr, (int)result->ai_addrlen);
+	// Bind socket to address
+	iResult = bind(listenSocket.get(), localAddrInfo->ai_addr, (int)localAddrInfo->ai_addrlen);
 	if (iResult == SOCKET_ERROR) {
 		printf("bind failed with error: %d\n", WSAGetLastError());
 		return 1;
 	}
-	freeaddrinfo(result);
-	result = NULL;
+	freeaddrinfo(localAddrInfo);
+	localAddrInfo = NULL;
 
+	// Listen to client connections
 	if (listen(listenSocket.get(), SOMAXCONN) == SOCKET_ERROR) {
 		printf("Listen failed with error: %ld\n", WSAGetLastError());
 		return 1;
@@ -63,11 +68,12 @@ int Mediator::CreateSocket()
 
 	wil::unique_socket clientSockets[2];
 	array<array<unique_ptr<Address>, 2>, 2> addresses;
-	printf("Accepting connections...\n");
 	for (int i = 0; i < 2; i++) {
 		auto& clientSocket = clientSockets[i];
 		sockaddr_in peerName;
 		int nameLen = sizeof(peerName);
+		// Accept a connection
+		cout << "Accepting connection #" << to_string(i) << endl;
 		clientSocket.reset(accept(listenSocket.get(), (sockaddr*)&peerName, &nameLen));
 		if (clientSocket.get() == INVALID_SOCKET) {
 			printf("accept failed: %d\n", WSAGetLastError());
@@ -79,16 +85,18 @@ int Mediator::CreateSocket()
 			return 1;
 		}
 		auto peerPublicPort = peerName.sin_port;
+		// Update public address of client
 		addresses[i][1] = make_unique<Address>(peerPublicIpAddress, peerPublicPort);
+		cout << "Client #" << to_string(i) << " connected: their public address is " << static_cast<string>(*addresses[i][1]) << endl;
 
 		char recvbuf[DEFAULT_BUFLEN + 1];
 		int recvbuflen = DEFAULT_BUFLEN;
-
+		// Receive private address of client
 		iResult = recv(clientSocket.get(), recvbuf, recvbuflen, 0);
 		if (iResult > 0) {
 			recvbuf[iResult] = '\0';
 			addresses[i][0] = make_unique<Address>(Address::FromString(recvbuf));
-			printf("Bytes received: %d\nMessage: %s\n", iResult, recvbuf);
+			cout << "Received private address of client #" << to_string(i) << ": " << static_cast<string>(*addresses[i][0]) << endl;
 		}
 		else {
 			printf("Connection closed before receiving any message");
@@ -105,6 +113,7 @@ int Mediator::CreateSocket()
 			printf("Failed sending public and private addresses: %d\n", WSAGetLastError());
 			return 1;
 		}
+		cout << "Sent private+public address of client #" << to_string(1 - i) << " to client #" << to_string(i) << endl;
 	}
 
 
