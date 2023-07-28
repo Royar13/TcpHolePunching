@@ -20,7 +20,7 @@ array<unique_ptr<Address>, 2> ParseAddressesFromMediator(string addressStr) {
 		throw exception("Unsupported mediator address string");
 	}
 	string firstAddress = addressStr.substr(0, pos);
-	string secondAddress = addressStr.substr(pos + 2);
+	string secondAddress = addressStr.substr(pos + 1);
 	array<unique_ptr<Address>, 2> addresses;
 	addresses[0] = make_unique<Address>(Address::FromString(firstAddress));
 	addresses[1] = make_unique<Address>(Address::FromString(secondAddress));
@@ -86,6 +86,8 @@ void Client::Connect(string& log, USHORT port, const Address& connectToAddress) 
 	TIMEVAL Timeout;
 	Timeout.tv_sec = c_timeoutSec;
 	Timeout.tv_usec = 0;
+
+	log += "Connect: connecting to: " + static_cast<string>(connectToAddress) + "\n";
 
 	for (int i = 0; i < c_maxAttempts; i++) {
 		// Connect to other client (peer)
@@ -180,6 +182,7 @@ void Client::Accept(string& log, USHORT port) {
 		log += "Accept: Listen failed with error: " + to_string(WSAGetLastError()) + "\n";
 		return;
 	}
+	log += "Accept: listening on port " + to_string(port) + "\n";
 
 	TIMEVAL Timeout;
 	Timeout.tv_sec = c_timeoutSec;
@@ -336,12 +339,16 @@ int Client::CreateSocket()
 		cerr << "Failed to establish connection with peer" << endl;
 		return 1;
 	}
-	cout << "Choose role: 0=Send,1=Receive" << endl;
-	char c;
-	cin.get(c);
-	if (c == 0) {
-		// Shutdown connection for receiving
-		iResult = shutdown(m_successfulPeerSocket.get(), SD_RECEIVE);
+	// Reset to blocking mode
+	unsigned long iMode = 0;
+	ioctlsocket(m_successfulPeerSocket.get(), FIONBIO, &iMode);
+
+	cout << "Choose role: 0=Receive,1=Send" << endl;
+	string c;
+	getline(cin, c);
+	if (c == "0") {
+		// Shutdown connection for sending
+		iResult = shutdown(m_successfulPeerSocket.get(), SD_SEND);
 		if (iResult == SOCKET_ERROR) {
 			cerr << "shutdown failed: " << to_string(WSAGetLastError()) << endl;
 			return 1;
@@ -362,8 +369,8 @@ int Client::CreateSocket()
 		}
 	}
 	else {
-		// Shutdown connection for sending
-		iResult = shutdown(m_successfulPeerSocket.get(), SD_SEND);
+		// Shutdown connection for receiving
+		iResult = shutdown(m_successfulPeerSocket.get(), SD_RECEIVE);
 		if (iResult == SOCKET_ERROR) {
 			cerr << "shutdown failed: " << to_string(WSAGetLastError()) << endl;
 			return 1;

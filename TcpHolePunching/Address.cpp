@@ -7,7 +7,7 @@ Address::Address(const std::string& ipAddress, USHORT port)
 {
 }
 
-Address::operator std::string()
+Address::operator std::string() const
 {
 	return ipAddress + ":" + to_string(port);
 }
@@ -19,7 +19,7 @@ Address Address::FromString(const std::string& session)
 		throw exception("Unsupported session string");
 	}
 	string ipAddress = session.substr(0, pos);
-	string port = session.substr(pos + 2);
+	string port = session.substr(pos + 1);
 	auto portNum = (USHORT)stoi(port);
 	return Address(ipAddress, portNum);
 }

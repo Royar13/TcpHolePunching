@@ -12,7 +12,7 @@ struct Address
 
 	Address(const std::string& ipAddress, USHORT port);
 
-	operator std::string();
+	operator std::string() const;
 
 	static Address FromString(const std::string& session);
 };
