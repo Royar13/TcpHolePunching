@@ -15,10 +15,12 @@ public:
 private:
 	static const int c_maxAttempts = 4;
 	static const int c_timeoutSec = 3;
+
+	std::string m_threadLogs[3];
 	wil::unique_socket m_successfulPeerSocket;
 	std::mutex m_updatePeerInfoMutex;
 
-	void Connect(USHORT port, const Address& connectToAddress);
-	void Accept(USHORT port);
+	void Connect(std::string& log, USHORT port, const Address& connectToAddress);
+	void Accept(std::string& log, USHORT port);
 };
 

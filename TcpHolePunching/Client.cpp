@@ -28,7 +28,7 @@ array<unique_ptr<Address>, 2> ParseAddressesFromMediator(string addressStr) {
 }
 
 // Connect to connectToAddress, using a local port
-void Client::Connect(USHORT port, const Address& connectToAddress) {
+void Client::Connect(string& log, USHORT port, const Address& connectToAddress) {
 	struct addrinfo* connectToAddressInfo = NULL,
 		* localAddrInfo = NULL,
 		hints;
@@ -41,7 +41,7 @@ void Client::Connect(USHORT port, const Address& connectToAddress) {
 	// Resolve the remote address to connect to
 	int iResult = getaddrinfo(connectToAddress.ipAddress.c_str(), to_string(connectToAddress.port).c_str(), &hints, &connectToAddressInfo);
 	if (iResult != 0) {
-		cerr << "Connect: getaddrinfo for connectToAddress failed: " << to_string(iResult) << endl;
+		log += "Connect: getaddrinfo for connectToAddress failed: " + to_string(iResult) + "\n";
 		return;
 	}
 
@@ -49,28 +49,28 @@ void Client::Connect(USHORT port, const Address& connectToAddress) {
 	wil::unique_socket connectSocket(socket(connectToAddressInfo->ai_family, connectToAddressInfo->ai_socktype, connectToAddressInfo->ai_protocol));
 	bool connected = false;
 	if (connectSocket.get() == INVALID_SOCKET) {
-		cout << "Connect: Error at socket(): " << to_string(WSAGetLastError()) << endl;
+		log += "Connect: Error at socket(): " + to_string(WSAGetLastError()) + "\n";
 		return;
 	}
 
 	// Enable reuse address
 	const char enable = 1;
 	if (setsockopt(connectSocket.get(), SOL_SOCKET, SO_REUSEADDR, &enable, sizeof(enable)) == SOCKET_ERROR) {
-		cerr << "Connect: Error at setsockopt() SO_REUSEADDR: " << to_string(WSAGetLastError()) << endl;
+		log += "Connect: Error at setsockopt() SO_REUSEADDR: " + to_string(WSAGetLastError()) + "\n";
 		return;
 	}
 
 	// Resolve the local address and port to be used by the client
 	iResult = getaddrinfo(NULL, to_string(port).c_str(), &hints, &localAddrInfo);
 	if (iResult != 0) {
-		cerr << "Connect: getaddrinfo for local address failed: " << to_string(iResult) << endl;
+		log += "Connect: getaddrinfo for local address failed: " + to_string(iResult) + "\n";
 		return;
 	}
 
 	// Bind socket to address
 	iResult = bind(connectSocket.get(), localAddrInfo->ai_addr, (int)localAddrInfo->ai_addrlen);
 	if (iResult == SOCKET_ERROR) {
-		cerr << "Connect: bind failed with error: " << to_string(WSAGetLastError()) << endl;
+		log += "Connect: bind failed with error: " + to_string(WSAGetLastError()) + "\n";
 		return;
 	}
 
@@ -79,7 +79,7 @@ void Client::Connect(USHORT port, const Address& connectToAddress) {
 	iResult = ioctlsocket(connectSocket.get(), FIONBIO, &iMode);
 	if (iResult == SOCKET_ERROR)
 	{
-		cerr << "Connect: ioctlsocket failed with error: " << to_string(iResult) << endl;
+		log += "Connect: ioctlsocket failed with error: " + to_string(iResult) + "\n";
 		return;
 	}
 
@@ -89,12 +89,12 @@ void Client::Connect(USHORT port, const Address& connectToAddress) {
 
 	for (int i = 0; i < c_maxAttempts; i++) {
 		// Connect to other client (peer)
-		cout << "Performing attempt #" << to_string(i) << " to connect to peer" << endl;
+		log += "Performing attempt #" + to_string(i) + " to connect to peer" + "\n";
 		iResult = connect(connectSocket.get(), connectToAddressInfo->ai_addr, (int)connectToAddressInfo->ai_addrlen);
 		if (iResult == SOCKET_ERROR) {
 			auto err = WSAGetLastError();
 			if (err != WSAEWOULDBLOCK) {
-				cerr << "Connect: Unable to connect to other client, error:" << to_string(err) << endl;
+				log += "Connect: Unable to connect to other client, error:" + to_string(err) + "\n";
 				return;
 			}
 		}
@@ -107,12 +107,12 @@ void Client::Connect(USHORT port, const Address& connectToAddress) {
 		iResult = select(0, NULL, &Write, NULL, &Timeout);
 		if (iResult == SOCKET_ERROR) {
 			// Error occurred
-			cerr << "Connect: select failed, error:" << to_string(WSAGetLastError()) << endl;
+			log += "Connect: select failed, error:" + to_string(WSAGetLastError()) + "\n";
 			return;
 		}
 		else if (iResult == 0) {
 			// Timeout occurred
-			cerr << "Connect: select timeout" << endl;
+			log += "Connect: select timeout\n";
 			continue;
 		}
 
@@ -121,13 +121,13 @@ void Client::Connect(USHORT port, const Address& connectToAddress) {
 			// already connected in other thread
 			return;
 		}
-		cout << "Successfully connected to peer!" << endl;
+		log += "Successfully connected to peer!\n";
 		m_successfulPeerSocket.swap(connectSocket);
 		return;
 	}
 }
 
-void Client::Accept(USHORT port) {
+void Client::Accept(string& log, USHORT port) {
 	struct addrinfo* localAddrInfo = NULL, hints;
 
 	ZeroMemory(&hints, sizeof(hints));
@@ -139,28 +139,28 @@ void Client::Accept(USHORT port) {
 	// Resolve the local address and port to be used by the client, acting a a server
 	auto iResult = getaddrinfo(NULL, to_string(port).c_str(), &hints, &localAddrInfo);
 	if (iResult != 0) {
-		cerr << "Accept: getaddrinfo failed: " << to_string(iResult) << endl;
+		log += "Accept: getaddrinfo failed: " + to_string(iResult) + "\n";
 		return;
 	}
 
 	// Create socket
 	wil::unique_socket listenSocket(socket(localAddrInfo->ai_family, localAddrInfo->ai_socktype, localAddrInfo->ai_protocol));
 	if (listenSocket.get() == INVALID_SOCKET) {
-		cerr << "Accept: Error at socket(): " << to_string(WSAGetLastError()) << endl;
+		log += "Accept: Error at socket(): " + to_string(WSAGetLastError()) + "\n";
 		return;
 	}
 
 	// Enable reuse address
 	const char enable = 1;
 	if (setsockopt(listenSocket.get(), SOL_SOCKET, SO_REUSEADDR, &enable, sizeof(enable)) == SOCKET_ERROR) {
-		cerr << "Accept: Error at setsockopt() SO_REUSEADDR: " << to_string(WSAGetLastError()) << endl;
+		log += "Accept: Error at setsockopt() SO_REUSEADDR: " + to_string(WSAGetLastError()) + "\n";
 		return;
 	}
 
 	// Bind socket to address
 	iResult = bind(listenSocket.get(), localAddrInfo->ai_addr, (int)localAddrInfo->ai_addrlen);
 	if (iResult == SOCKET_ERROR) {
-		cerr << "Accept: bind failed with error: " << to_string(WSAGetLastError()) << endl;
+		log += "Accept: bind failed with error: " + to_string(WSAGetLastError()) + "\n";
 		return;
 	}
 	freeaddrinfo(localAddrInfo);
@@ -171,13 +171,13 @@ void Client::Accept(USHORT port) {
 	iResult = ioctlsocket(listenSocket.get(), FIONBIO, &iMode);
 	if (iResult == SOCKET_ERROR)
 	{
-		cerr << "Accept: ioctlsocket failed with error: " << to_string(iResult) << endl;
+		log += "Accept: ioctlsocket failed with error: " + to_string(iResult) + "\n";
 		return;
 	}
 
 	// Listen to connection from other client
 	if (listen(listenSocket.get(), SOMAXCONN) == SOCKET_ERROR) {
-		cerr << "Accept: Listen failed with error: " << to_string(WSAGetLastError()) << endl;
+		log += "Accept: Listen failed with error: " + to_string(WSAGetLastError()) + "\n";
 		return;
 	}
 
@@ -186,34 +186,32 @@ void Client::Accept(USHORT port) {
 	Timeout.tv_usec = 0;
 
 	for (int i = 0; i < c_maxAttempts; i++) {
-		cout << "Performing attempt #" << to_string(i) << " to accept peer's connection" << endl;
-		sockaddr_in peerName;
-		int nameLen = sizeof(peerName);
-		// Accept a connection from other client (peer)
-		wil::unique_socket clientSocket(accept(listenSocket.get(), (sockaddr*)&peerName, &nameLen));
-		if (clientSocket.get() == INVALID_SOCKET) {
-			auto err = WSAGetLastError();
-			if (err != WSAEWOULDBLOCK) {
-				cerr << "Accept: accept failed: " << to_string(err) << endl;
-				return;
-			}
-		}
+		log += "Performing attempt #" + to_string(i) + " to accept peer's connection\n";
 
 		fd_set Read;
 		FD_ZERO(&Read);
-		FD_SET(clientSocket.get(), &Read);
+		FD_SET(listenSocket.get(), &Read);
 
 		// Check if the socket is ready (Read=ready to receive)
 		iResult = select(0, &Read, NULL, NULL, &Timeout);
 		if (iResult == SOCKET_ERROR) {
 			// Error occurred
-			cerr << "Accept: select failed, error:" << to_string(WSAGetLastError()) << endl;
+			log += "Accept: select failed, error:" + to_string(WSAGetLastError()) + "\n";
 			return;
 		}
 		else if (iResult == 0) {
 			// Timeout occurred
-			cerr << "Accept: select timeout" << endl;
+			log += "Accept: select timeout\n";
 			continue;
+		}
+
+		sockaddr_in peerName;
+		int nameLen = sizeof(peerName);
+		// Accept a connection from other client (peer)
+		wil::unique_socket clientSocket(accept(listenSocket.get(), (sockaddr*)&peerName, &nameLen));
+		if (clientSocket.get() == INVALID_SOCKET) {
+			log += "Accept: accept failed: " + to_string(WSAGetLastError()) + "\n";
+			return;
 		}
 
 		lock_guard<mutex> lock(m_updatePeerInfoMutex);
@@ -222,7 +220,7 @@ void Client::Accept(USHORT port) {
 			return;
 		}
 
-		cout << "Successfully accepted peer's connection!" << endl;
+		log += "Successfully accepted peer's connection!\n";
 		m_successfulPeerSocket.swap(clientSocket);
 		return;
 	}
@@ -322,13 +320,17 @@ int Client::CreateSocket()
 	auto addresses = ParseAddressesFromMediator(recvbuf);
 	cout << "Received peer's addresses from mediator: " << recvbuf << endl;
 
-	thread connectToPrivateThread(&Client::Connect, this, privateAddress.port, *addresses[0]);
-	thread connectToPublicThread(&Client::Connect, this, privateAddress.port, *addresses[1]);
-	thread acceptThread(&Client::Accept, this, privateAddress.port);
+	thread connectToPrivateThread(&Client::Connect, this, ref(m_threadLogs[0]), privateAddress.port, *addresses[0]);
+	thread connectToPublicThread(&Client::Connect, this, ref(m_threadLogs[1]), privateAddress.port, *addresses[1]);
+	thread acceptThread(&Client::Accept, this, ref(m_threadLogs[2]), privateAddress.port);
 
 	connectToPrivateThread.join();
 	connectToPublicThread.join();
 	acceptThread.join();
+
+	for (int i = 0; i < 3; i++) {
+		cout << "Logs of thread " + to_string(i) + ":\n" << m_threadLogs[i] << endl;
+	}
 
 	if (!m_successfulPeerSocket) {
 		cerr << "Failed to establish connection with peer" << endl;
