@@ -1,16 +1,9 @@
+#include "stdafx.h"
 #include "Client.h"
-#include <Ws2tcpip.h>
-#include <winsock2.h>
-#include <string>
-#include <wil/resource.h>
 #include "Address.h"
-#include <array>
-#include <memory>
-#include <iostream>
 
 using namespace std;
 
-#define PORT "8080"
 #define DEFAULT_BUFLEN 512
 
 // Split string of private and public addresses, separated by semicolon
@@ -28,7 +21,9 @@ array<unique_ptr<Address>, 2> ParseAddressesFromMediator(string addressStr) {
 }
 
 // Connect to connectToAddress, using a local port
-void Client::Connect(string& log, USHORT port, const Address& connectToAddress) {
+void Client::Connect(string& log, const Address& localAddress, const Address& connectToAddress) {
+	log += "Connect thread\n";
+
 	struct addrinfo* connectToAddressInfo = NULL,
 		* localAddrInfo = NULL,
 		hints;
@@ -61,13 +56,14 @@ void Client::Connect(string& log, USHORT port, const Address& connectToAddress) 
 	}
 
 	// Resolve the local address and port to be used by the client
-	iResult = getaddrinfo(NULL, to_string(port).c_str(), &hints, &localAddrInfo);
+	iResult = getaddrinfo(localAddress.ipAddress.c_str(), to_string(localAddress.port).c_str(), &hints, &localAddrInfo);
 	if (iResult != 0) {
 		log += "Connect: getaddrinfo for local address failed: " + to_string(iResult) + "\n";
 		return;
 	}
 
 	// Bind socket to address
+	log += "Binding to address: " + static_cast<string>(localAddress) + "\n";
 	iResult = bind(connectSocket.get(), localAddrInfo->ai_addr, (int)localAddrInfo->ai_addrlen);
 	if (iResult == SOCKET_ERROR) {
 		log += "Connect: bind failed with error: " + to_string(WSAGetLastError()) + "\n";
@@ -84,10 +80,10 @@ void Client::Connect(string& log, USHORT port, const Address& connectToAddress) 
 	}
 
 	TIMEVAL Timeout;
-	Timeout.tv_sec = c_timeoutSec;
+	Timeout.tv_sec = c_connectTimeoutSec;
 	Timeout.tv_usec = 0;
 
-	log += "Connect: connecting to: " + static_cast<string>(connectToAddress) + "\n";
+	log += "Connecting to: " + static_cast<string>(connectToAddress) + "\n";
 
 	for (int i = 0; i < c_maxAttempts; i++) {
 		// Connect to other client (peer)
@@ -102,15 +98,19 @@ void Client::Connect(string& log, USHORT port, const Address& connectToAddress) 
 		}
 
 		fd_set Write;
+		fd_set Error;
 		FD_ZERO(&Write);
+		FD_ZERO(&Error);
 		FD_SET(connectSocket.get(), &Write);
+		FD_SET(connectSocket.get(), &Error);
 
 		// Check if the socket is ready (Write=ready to send to)
-		iResult = select(0, NULL, &Write, NULL, &Timeout);
+		iResult = select(0, NULL, &Write, &Error, &Timeout);
 		if (iResult == SOCKET_ERROR) {
 			// Error occurred
-			log += "Connect: select failed, error:" + to_string(WSAGetLastError()) + "\n";
-			return;
+			log += "Connect: select failed, error:" + to_string(WSAGetLastError()) + ". Waiting 1 sec before retrying\n";
+			Sleep(1000);
+			continue;
 		}
 		else if (iResult == 0) {
 			// Timeout occurred
@@ -118,18 +118,29 @@ void Client::Connect(string& log, USHORT port, const Address& connectToAddress) 
 			continue;
 		}
 
-		lock_guard<mutex> lock(m_updatePeerInfoMutex);
-		if (m_successfulPeerSocket) {
-			// already connected in other thread
-			return;
+		if (FD_ISSET(connectSocket.get(), &Write)) {
+			lock_guard<mutex> lock(m_updatePeerInfoMutex);
+			if (m_successfulPeerSocket) {
+				// already connected in other thread
+				return;
+			}
+			log += "Successfully connected to peer!\n";
+			m_successfulPeerSocket.swap(connectSocket);
 		}
-		log += "Successfully connected to peer!\n";
-		m_successfulPeerSocket.swap(connectSocket);
+		else {
+			// Error was set
+			log += "Error was set on socket. Waiting 1 sec before retrying\n";
+			Sleep(1000);
+			continue;
+		}
+
 		return;
 	}
 }
 
 void Client::Accept(string& log, USHORT port) {
+	log += "Accept thread\n";
+
 	struct addrinfo* localAddrInfo = NULL, hints;
 
 	ZeroMemory(&hints, sizeof(hints));
@@ -138,7 +149,7 @@ void Client::Accept(string& log, USHORT port) {
 	hints.ai_protocol = IPPROTO_TCP;
 	hints.ai_flags = AI_PASSIVE;
 
-	// Resolve the local address and port to be used by the client, acting a a server
+	// Resolve the local address and port to be used by the client, acting as a server
 	auto iResult = getaddrinfo(NULL, to_string(port).c_str(), &hints, &localAddrInfo);
 	if (iResult != 0) {
 		log += "Accept: getaddrinfo failed: " + to_string(iResult) + "\n";
@@ -160,6 +171,7 @@ void Client::Accept(string& log, USHORT port) {
 	}
 
 	// Bind socket to address
+	log += "Binding to port: " + to_string(port) + "\n";
 	iResult = bind(listenSocket.get(), localAddrInfo->ai_addr, (int)localAddrInfo->ai_addrlen);
 	if (iResult == SOCKET_ERROR) {
 		log += "Accept: bind failed with error: " + to_string(WSAGetLastError()) + "\n";
@@ -185,51 +197,48 @@ void Client::Accept(string& log, USHORT port) {
 	log += "Accept: listening on port " + to_string(port) + "\n";
 
 	TIMEVAL Timeout;
-	Timeout.tv_sec = c_timeoutSec;
+	Timeout.tv_sec = c_acceptTimeoutSec;
 	Timeout.tv_usec = 0;
 
-	for (int i = 0; i < c_maxAttempts; i++) {
-		log += "Performing attempt #" + to_string(i) + " to accept peer's connection\n";
+	fd_set Read;
+	FD_ZERO(&Read);
+	FD_SET(listenSocket.get(), &Read);
 
-		fd_set Read;
-		FD_ZERO(&Read);
-		FD_SET(listenSocket.get(), &Read);
-
-		// Check if the socket is ready (Read=ready to receive)
-		iResult = select(0, &Read, NULL, NULL, &Timeout);
-		if (iResult == SOCKET_ERROR) {
-			// Error occurred
-			log += "Accept: select failed, error:" + to_string(WSAGetLastError()) + "\n";
-			return;
-		}
-		else if (iResult == 0) {
-			// Timeout occurred
-			log += "Accept: select timeout\n";
-			continue;
-		}
-
-		sockaddr_in peerName;
-		int nameLen = sizeof(peerName);
-		// Accept a connection from other client (peer)
-		wil::unique_socket clientSocket(accept(listenSocket.get(), (sockaddr*)&peerName, &nameLen));
-		if (clientSocket.get() == INVALID_SOCKET) {
-			log += "Accept: accept failed: " + to_string(WSAGetLastError()) + "\n";
-			return;
-		}
-
-		lock_guard<mutex> lock(m_updatePeerInfoMutex);
-		if (m_successfulPeerSocket) {
-			// already connected in other thread
-			return;
-		}
-
-		log += "Successfully accepted peer's connection!\n";
-		m_successfulPeerSocket.swap(clientSocket);
+	// Check if the socket is ready (Read=ready to receive)
+	iResult = select(0, &Read, NULL, NULL, &Timeout);
+	if (iResult == SOCKET_ERROR) {
+		// Error occurred
+		log += "Accept: select failed, error:" + to_string(WSAGetLastError()) + "\n";
 		return;
 	}
+	else if (iResult == 0) {
+		// Timeout occurred
+		log += "Accept: select timeout\n";
+		return;
+	}
+
+	sockaddr_in peerName;
+	int nameLen = sizeof(peerName);
+	// Accept a connection from other client (peer)
+	wil::unique_socket clientSocket(accept(listenSocket.get(), (sockaddr*)&peerName, &nameLen));
+	if (clientSocket.get() == INVALID_SOCKET) {
+		log += "Accept: accept failed: " + to_string(WSAGetLastError()) + "\n";
+		return;
+	}
+
+	lock_guard<mutex> lock(m_updatePeerInfoMutex);
+	if (m_successfulPeerSocket) {
+		// already connected in other thread
+		return;
+	}
+
+	log += "Successfully accepted peer's connection!\n";
+	m_successfulPeerSocket.swap(clientSocket);
+
+	return;
 }
 
-int Client::CreateSocket()
+int Client::CreateSocket(Address mediatorAddr)
 {
 	struct addrinfo* mediatorAddrInfo = NULL, hints;
 
@@ -246,7 +255,7 @@ int Client::CreateSocket()
 		});
 
 	// Resolve address and port of mediator
-	int iResult = getaddrinfo("127.0.0.1", PORT, &hints, &mediatorAddrInfo);
+	int iResult = getaddrinfo(mediatorAddr.ipAddress.c_str(), to_string(mediatorAddr.port).c_str(), &hints, &mediatorAddrInfo);
 	if (iResult != 0) {
 		cerr << "getaddrinfo failed: " << to_string(iResult) << endl;
 		return 1;
@@ -323,15 +332,31 @@ int Client::CreateSocket()
 	auto addresses = ParseAddressesFromMediator(recvbuf);
 	cout << "Received peer's addresses from mediator: " << recvbuf << endl;
 
-	thread connectToPrivateThread(&Client::Connect, this, ref(m_threadLogs[0]), privateAddress.port, *addresses[0]);
-	thread connectToPublicThread(&Client::Connect, this, ref(m_threadLogs[1]), privateAddress.port, *addresses[1]);
-	thread acceptThread(&Client::Accept, this, ref(m_threadLogs[2]), privateAddress.port);
+	// Receive own public address
+	iResult = recv(connectSocket.get(), recvbuf, recvbuflen, 0);
+	if (iResult == 0) {
+		cerr << "Connection closed" << endl;
+		return 1;
+	}
+	else if (iResult < 0) {
+		cerr << "recv failed: " << to_string(WSAGetLastError()) << endl;
+		return 1;
+	}
+	recvbuf[iResult] = '\0';
+	auto publicAddress = Address::FromString(recvbuf);
+	cout << "Received own public address from mediator: " << recvbuf << endl;
+
+	thread connectToPrivateThread(&Client::Connect, this, ref(m_threadLogs[0]), privateAddress, *addresses[0]);
+	thread connectToPublicThread(&Client::Connect, this, ref(m_threadLogs[1]), privateAddress, *addresses[1]);
+	thread acceptPrivateThread(&Client::Accept, this, ref(m_threadLogs[2]), privateAddress.port);
+	thread acceptPublicThread(&Client::Accept, this, ref(m_threadLogs[3]), publicAddress.port);
 
 	connectToPrivateThread.join();
 	connectToPublicThread.join();
-	acceptThread.join();
+	acceptPrivateThread.join();
+	acceptPublicThread.join();
 
-	for (int i = 0; i < 3; i++) {
+	for (int i = 0; i < m_threadLogs.size(); i++) {
 		cout << "Logs of thread " + to_string(i) + ":\n" << m_threadLogs[i] << endl;
 	}
 

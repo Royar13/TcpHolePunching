@@ -14,6 +14,6 @@ struct Address
 
 	operator std::string() const;
 
-	static Address FromString(const std::string& session);
+	static Address FromString(const std::string& address);
 };
 

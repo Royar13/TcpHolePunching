@@ -1,19 +1,12 @@
+#include "stdafx.h"
 #include "Mediator.h"
-#include <winsock2.h>
-#include <ws2tcpip.h>
-#include <string>
-#include <memory>
-#include <wil/resource.h>
-#include <array>
 #include "Address.h"
-#include <iostream>
 
 using namespace std;
 
-#define PORT "8080"
 #define DEFAULT_BUFLEN 512
 
-int Mediator::CreateSocket()
+int Mediator::CreateSocket(USHORT port)
 {
 	struct addrinfo* localAddrInfo = NULL, hints;
 
@@ -31,7 +24,7 @@ int Mediator::CreateSocket()
 		});
 
 	// Resolve the local address and port to be used by the server
-	auto iResult = getaddrinfo(NULL, PORT, &hints, &localAddrInfo);
+	auto iResult = getaddrinfo(NULL, to_string(port).c_str(), &hints, &localAddrInfo);
 	if (iResult != 0) {
 		printf("getaddrinfo failed: %d\n", iResult);
 		return 1;
@@ -114,6 +107,15 @@ int Mediator::CreateSocket()
 			return 1;
 		}
 		cout << "Sent private+public address of client #" << to_string(1 - i) << " to client #" << to_string(i) << endl;
+
+		// Send a client its own public address
+		string sendbufOwn = string(*addresses[i][1]);
+		iResult = send(clientSocket.get(), sendbufOwn.c_str(), (int)strlen(sendbufOwn.c_str()), 0);
+		if (iResult == SOCKET_ERROR) {
+			printf("Failed sending client its own public address: %d\n", WSAGetLastError());
+			return 1;
+		}
+		cout << "Sent public address of client #" << to_string(i) << " to itself" << endl;
 	}
 
 

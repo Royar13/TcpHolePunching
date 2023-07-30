@@ -1,3 +1,4 @@
+#include "stdafx.h"
 #include "Address.h"
 
 using namespace std;
@@ -12,14 +13,14 @@ Address::operator std::string() const
 	return ipAddress + ":" + to_string(port);
 }
 
-Address Address::FromString(const std::string& session)
+Address Address::FromString(const std::string& address)
 {
-	auto pos = session.find(":");
+	auto pos = address.find(":");
 	if (pos == string::npos) {
-		throw exception("Unsupported session string");
+		throw exception("Unsupported address string");
 	}
-	string ipAddress = session.substr(0, pos);
-	string port = session.substr(pos + 1);
+	string ipAddress = address.substr(0, pos);
+	string port = address.substr(pos + 1);
 	auto portNum = (USHORT)stoi(port);
 	return Address(ipAddress, portNum);
 }

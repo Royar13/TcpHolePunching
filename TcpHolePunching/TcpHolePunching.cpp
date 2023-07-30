@@ -1,3 +1,4 @@
+#include "stdafx.h"
 #pragma comment(lib, "Ws2_32.lib")
 
 #include <iostream>
@@ -9,13 +10,14 @@
 
 using namespace std;
 
-int wmain(int argc, wchar_t* argv[])
+int main(int argc, char* argv[])
 {
-	if (argc != 2) {
-		perror("One argument expected");
-		exit(EXIT_FAILURE);
+	if (argc != 3) {
+		perror("Two arguments are expected");
+		return 1;
 	}
-	wstring arg = argv[1];
+	string arg = argv[1];
+	string arg2 = argv[2];
 
 	WSADATA wsaData;
 
@@ -26,16 +28,19 @@ int wmain(int argc, wchar_t* argv[])
 		return 1;
 	}
 
-	if (arg == L"client") {
+	if (arg == "client") {
+		auto addr = Address::FromString(arg2);
 		Client client;
-		client.CreateSocket();
+		return client.CreateSocket(addr);
 	}
-	else if (arg == L"server") {
+	else if (arg == "server") {
+		auto port = (USHORT)stoi(arg2);
 		Mediator server;
-		server.CreateSocket();
+		return server.CreateSocket(port);
 	}
 	else {
-		throw exception("Unsupported argument");
+		cerr << "Unsupported argument" << endl;
+		return 1;
 	}
 }
 

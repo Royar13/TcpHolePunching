@@ -2,7 +2,7 @@
 class Mediator
 {
 public:
-	int CreateSocket();
+	int CreateSocket(USHORT port);
 
 };
 

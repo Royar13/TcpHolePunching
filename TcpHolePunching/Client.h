@@ -4,23 +4,25 @@
 #include <ws2tcpip.h>
 #include <wil/resource.h>
 #include <mutex>
+#include <array>
 #include "Address.h"
 
 
 class Client
 {
 public:
-	int CreateSocket();
+	int CreateSocket(Address mediatorAddr);
 
 private:
-	static const int c_maxAttempts = 4;
-	static const int c_timeoutSec = 3;
+	static constexpr int c_maxAttempts = 10;
+	static constexpr int c_connectTimeoutSec = 1;
+	static constexpr int c_acceptTimeoutSec = c_maxAttempts * c_connectTimeoutSec;
 
-	std::string m_threadLogs[3];
+	std::array<std::string, 4> m_threadLogs;
 	wil::unique_socket m_successfulPeerSocket;
 	std::mutex m_updatePeerInfoMutex;
 
-	void Connect(std::string& log, USHORT port, const Address& connectToAddress);
+	void Connect(std::string& log, const Address& localAddress, const Address& connectToAddress);
 	void Accept(std::string& log, USHORT port);
 };
 
