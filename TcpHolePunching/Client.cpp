@@ -351,11 +351,6 @@ int Client::CreateSocket(Address mediatorAddr)
 	thread acceptPrivateThread(&Client::Accept, this, ref(m_threadLogs[2]), privateAddress.port);
 	thread acceptPublicThread(&Client::Accept, this, ref(m_threadLogs[3]), publicAddress.port);
 
-	connectToPrivateThread.join();
-	connectToPublicThread.join();
-	acceptPrivateThread.join();
-	acceptPublicThread.join();
-
 	for (int i = 0; i < m_threadLogs.size(); i++) {
 		cout << "Logs of thread " + to_string(i) + ":\n" << m_threadLogs[i] << endl;
 	}
@@ -413,6 +408,11 @@ int Client::CreateSocket(Address mediatorAddr)
 			cout << "Sent message to peer: " << sendbuf << endl;
 		}
 	}
+
+	connectToPrivateThread.join();
+	connectToPublicThread.join();
+	acceptPrivateThread.join();
+	acceptPublicThread.join();
 
 	return 0;
 }

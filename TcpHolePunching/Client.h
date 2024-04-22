@@ -1,12 +1,6 @@
 #pragma once
 
-#include <winsock2.h>
-#include <ws2tcpip.h>
-#include <wil/resource.h>
-#include <mutex>
-#include <array>
 #include "Address.h"
-
 
 class Client
 {
@@ -21,6 +15,7 @@ private:
 	std::array<std::string, 4> m_threadLogs;
 	wil::unique_socket m_successfulPeerSocket;
 	std::mutex m_updatePeerInfoMutex;
+	std::condition_variable m_cvConnected;
 
 	void Connect(std::string& log, const Address& localAddress, const Address& connectToAddress);
 	void Accept(std::string& log, USHORT port);
